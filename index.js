@@ -31,3 +31,12 @@ if (!fs.existsSync(dockerPath)) {
 log(` | Found docker at ${dockerPath}`);
 const docker = new Docker({socketPath: dockerPath});
 log(` | Created docker client!`);
+
+log(`> Connecting to API...`);
+main();
+
+async function main() {
+    const ok = await fetch(`https://clients.meegie.net/connect?code=${code}`);
+
+    console.log(ok.ok, await ok.json());
+}
