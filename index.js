@@ -1,6 +1,8 @@
+require('dotenv').config();
+
 const { log } = console;
 
-console.clear();
+// console.clear();
 
 const os = require('os');
 const fs = require('fs');
@@ -19,7 +21,7 @@ log(` | Client CPU: ${clientCPU} vCPU`);
 
 // Get code
 log(`> Getting code...`);
-const code = process.argv[2];
+const code = process.env.CODE;
 log(` | Connect code: ${code}`);
 
 // Check docker
@@ -36,7 +38,7 @@ log(`> Connecting to API...`);
 main();
 
 async function main() {
-    const ok = await fetch(`https://clients.meegie.net/connect?code=${code}`);
+    const ok = await fetch(`${process.env.API}/connect?code=${code}`);
 
     console.log(ok.ok, await ok.json());
 }
