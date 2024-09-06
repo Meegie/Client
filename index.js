@@ -87,3 +87,24 @@ async function getJob() {
 
     console.log(job);
 }
+
+async function pull(img) {
+    //followProgress(stream, onFinished, [onProgress])
+
+    log(`> Pulling ${img}`);
+
+    docker.pull(img, function(err, stream) {
+        //...
+        docker.modem.followProgress(stream, onFinished, onProgress);
+    
+        function onFinished(err, output) {
+        //output is an array with output json parsed objects
+            log(` | Pull ${img} finished!`, err, output);
+        //...
+        }
+        function onProgress(event) {
+        //...
+            log(` | Pull progress: `, event)
+        }
+    });
+}
