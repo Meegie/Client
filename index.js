@@ -14,7 +14,7 @@ log(`> Starting Meegie client...`);
 
 // Check ram
 log(`> Checking resources...`);
-const clientRAM = Math.floor(os.totalmem()/1024/1024);
+const clientRAM = Math.floor(os.totalmem() / 1024 / 1024);
 const clientCPU = os.cpus().length;
 log(` | Client RAM: ${clientRAM} MB`);
 log(` | Client CPU: ${clientCPU} vCPU`);
@@ -41,7 +41,7 @@ if (!fs.existsSync(dockerPath)) {
     process.exit(1);
 }
 log(` | Found docker at ${dockerPath}`);
-const docker = new Docker({socketPath: dockerPath});
+const docker = new Docker({ socketPath: dockerPath });
 log(` | Created docker client!`);
 
 log(`> Connecting to API...`);
@@ -54,13 +54,14 @@ async function main() {
 
     if (ok.ok == false) {
         log(` | Failed to connect: ${(await ok.json()).error}`);
+        process.exit(1);
     }
 
     log(` |  Connected!`);
 
     setInterval(() => {
         if (isWorking == false) getJob();
-    }, 1000*60*5);
+    }, 1000 * 60 * 5);
     getJob();
 }
 
@@ -71,10 +72,10 @@ async function ping() {
 
 setInterval(() => {
     if (isWorking == true) ping();
-}, 1000*60*1);
+}, 1000 * 60 * 1);
 setInterval(() => {
     if (isWorking == false) ping();
-}, 1000*60*5);
+}, 1000 * 60 * 5);
 
 async function getJob() {
     log(`> Getting job...`);
@@ -85,7 +86,28 @@ async function getJob() {
         return log(` | No job found :(`);
     }
 
-    console.log(job);
+    console.log(` | Found job ${job.jobID}`);
+
+    const { image, ramRequired, cpuRequired, timeLimit } = job;
+
+    try {
+        await pull(image);
+
+        log(` | Image pulled!`);
+    } catch(e) {
+        await fetch(`${process.env.API}/jobs/finush?code=${code}`, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+                ok: false,
+                exitCode: 1,
+                error: e
+            })
+        }).then(r => r.json());
+    }
+    
 }
 
 async function pull(img) {
@@ -93,18 +115,24 @@ async function pull(img) {
 
     log(`> Pulling ${img}`);
 
-    docker.pull(img, function(err, stream) {
-        //...
-        docker.modem.followProgress(stream, onFinished, onProgress);
-    
-        function onFinished(err, output) {
-        //output is an array with output json parsed objects
-            log(` | Pull ${img} finished!`, err, output);
-        //...
-        }
-        function onProgress(event) {
-        //...
-            log(` | Pull progress: `, event)
-        }
+    return new Promise((resolve, reject) => {
+
+        docker.pull(img, function (err, stream) {
+            //...
+            docker.modem.followProgress(stream, onFinished, onProgress);
+
+            function onFinished(err, output) {
+                //output is an array with output json parsed objects
+                log(` | Pull ${img} finished!`, err);
+                if (err) reject(err);
+
+                resolve();
+                //...
+            }
+            function onProgress(event) {
+                //...
+                log(` | Pull progress: ${event.status}`)
+            }
+        });
     });
 }
