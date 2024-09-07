@@ -61,9 +61,19 @@ async function main() {
     log(` |  Connected!`);
 
     setInterval(() => {
-        if (isWorking == false) getJob();
+        if (isWorking == false) {
+            try {
+                getJob();
+            } catch(e) {
+                console.log(`Failed to get job!`, e);
+            }
+        }
     }, 1000 * 60 * 1);
-    getJob();
+    try {
+        getJob();
+    } catch(e) {
+        console.log(`Failed to get job!`, e);
+    }
 
     ping();
 }
