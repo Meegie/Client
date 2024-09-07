@@ -7,6 +7,7 @@ const { log } = console;
 const os = require('os');
 const fs = require('fs');
 const Docker = require('dockerode');
+const Stream = require('stream'); 
 
 let dockerPath = '/var/run/docker.sock';
 
@@ -63,6 +64,8 @@ async function main() {
         if (isWorking == false) getJob();
     }, 1000 * 60 * 5);
     getJob();
+
+    ping();
 }
 
 async function ping() {
@@ -94,8 +97,57 @@ async function getJob() {
         await pull(image);
 
         log(` | Image pulled!`);
-    } catch(e) {
-        await fetch(`${process.env.API}/jobs/finush?code=${code}`, {
+
+        const output = new Stream.Writable({
+            write: async (data) => {
+                data = String(data);
+                try {
+                   var a = await fetch(`${process.env.API}/jobs/log?code=${code}`, {
+                        method: 'POST',
+                        headers: {
+                            'content-type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            message: data
+                        })
+                    }).then(r => r.json());
+                    console.log(a);
+                } catch(e) {
+                    console.log(`> Failed to send log! ${String(e)}`, e);
+                    process.exit(1);
+                }
+            }
+        });
+
+        var newContainer = await docker.run(image, null, output, {
+            HostConfig: {
+                AutoRemove: true
+            }
+        });
+
+        output.on('data', (d) => {
+            console.log(` | Output: ${String(d)}`);
+        });
+
+        var result = newContainer[0];
+        console.log(result);
+
+        var isOk = true;
+        if (result.StatusCode != 0) isOk = false;
+
+        await fetch(`${process.env.API}/jobs/finish?code=${code}`, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify({
+                ok: isOk,
+                exitCode: result.StatusCode,
+                error: `Check logs ^`
+            })
+        }).then(r => r.json());
+    } catch (e) {
+        await fetch(`${process.env.API}/jobs/finish?code=${code}`, {
             method: 'POST',
             headers: {
                 'content-type': 'application/json'
@@ -103,11 +155,13 @@ async function getJob() {
             body: JSON.stringify({
                 ok: false,
                 exitCode: 1,
-                error: e
+                error: String(e)
             })
         }).then(r => r.json());
+
+        log(` | Job failed: ${String(e)}`);
     }
-    
+
 }
 
 async function pull(img) {
@@ -118,20 +172,25 @@ async function pull(img) {
     return new Promise((resolve, reject) => {
 
         docker.pull(img, function (err, stream) {
+            if (err) return reject(err);
             //...
-            docker.modem.followProgress(stream, onFinished, onProgress);
+            try {
+                docker.modem.followProgress(stream, onFinished, onProgress);
 
-            function onFinished(err, output) {
-                //output is an array with output json parsed objects
-                log(` | Pull ${img} finished!`, err);
-                if (err) reject(err);
+                function onFinished(err, output) {
+                    //output is an array with output json parsed objects
+                    log(` | Pull ${img} finished!`, err);
+                    if (err) return reject(err);
 
-                resolve();
-                //...
-            }
-            function onProgress(event) {
-                //...
-                log(` | Pull progress: ${event.status}`)
+                    resolve();
+                    //...
+                }
+                function onProgress(event) {
+                    //...
+                    log(` | Pull progress: ${event.status}`)
+                }
+            } catch (e) {
+                reject(e);
             }
         });
     });
