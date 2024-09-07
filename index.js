@@ -125,10 +125,6 @@ async function getJob() {
             }
         });
 
-        output.on('data', (d) => {
-            console.log(` | Output: ${String(d)}`);
-        });
-
         var result = newContainer[0];
         console.log(result);
 
