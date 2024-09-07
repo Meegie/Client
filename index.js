@@ -129,7 +129,9 @@ async function getJob() {
                 }
             });
 
-            var newContainer = await docker.run(image, null, output, {
+            // Start the container
+            var container = await docker.createContainer({
+                Image: image,
                 HostConfig: {
                     AutoRemove: true,
                     Memory: ramRequired * 1_048_576,
@@ -139,11 +141,38 @@ async function getJob() {
                 }
             });
 
-            var result = newContainer[0];
-            console.log(result);
+            // Set a timeout to kill the container if it exceeds the time limit
+            const containerTimeout = setTimeout(async () => {
+                log(` | Time limit of ${timeLimit} seconds reached, stopping container...`);
+                await container.stop();
+                await fetch(`${process.env.API}/jobs/finish?code=${code}`, {
+                    method: 'POST',
+                    headers: {
+                        'content-type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        ok: false,
+                        exitCode: 1,
+                        error: `Job exceeded time limit of ${timeLimit} seconds`
+                    })
+                });
+            }, timeLimit * 1000);
+
+            // Start the container and run the job
+            const result = await container.start();
+
+            log(` | Container started!`);
+
+            const containerStream = await container.attach({ stream: true, stdout: true, stderr: true });
+            containerStream.pipe(output);
+
+            // Wait for the container to finish
+            const exitCode = await container.wait();
+            
+            clearTimeout(containerTimeout); // Clear the timeout if the container finishes within the time limit
 
             var isOk = true;
-            if (result.StatusCode != 0) isOk = false;
+            if (exitCode.StatusCode != 0) isOk = false;
 
             await fetch(`${process.env.API}/jobs/finish?code=${code}`, {
                 method: 'POST',
@@ -152,7 +181,7 @@ async function getJob() {
                 },
                 body: JSON.stringify({
                     ok: isOk,
-                    exitCode: result.StatusCode,
+                    exitCode: exitCode.StatusCode,
                     error: `Check logs ^`
                 })
             }).then(r => r.json());
@@ -177,6 +206,7 @@ async function getJob() {
         console.log('failed getting job...', e)
     }
 }
+
 
 async function pull(img) {
     //followProgress(stream, onFinished, [onProgress])
