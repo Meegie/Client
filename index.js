@@ -102,16 +102,15 @@ async function getJob() {
             write: async (data) => {
                 data = String(data);
                 try {
-                   var a = await fetch(`${process.env.API}/jobs/log?code=${code}`, {
+                   await fetch(`${process.env.API}/jobs/log?code=${code}`, {
                         method: 'POST',
                         headers: {
                             'content-type': 'application/json'
                         },
                         body: JSON.stringify({
-                            message: data
+                            message: `[CONTAINER] ${data}`
                         })
-                    }).then(r => r.json());
-                    console.log(a);
+                    });
                 } catch(e) {
                     console.log(`> Failed to send log! ${String(e)}`, e);
                     process.exit(1);
@@ -121,7 +120,11 @@ async function getJob() {
 
         var newContainer = await docker.run(image, null, output, {
             HostConfig: {
-                AutoRemove: true
+                AutoRemove: true,
+                Memory: ramRequired * 1_048_576,
+                CpuQuota: cpuRequired * 100_000,
+                CPUPeriod: 100_000,
+                CpuShares: 1024
             }
         });
 
