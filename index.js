@@ -145,6 +145,8 @@ async function getJob() {
                 error: `Check logs ^`
             })
         }).then(r => r.json());
+
+        console.log(` | Job ${job.jobID} finished!`);
     } catch (e) {
         await fetch(`${process.env.API}/jobs/finish?code=${code}`, {
             method: 'POST',
