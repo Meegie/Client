@@ -62,7 +62,7 @@ async function main() {
 
     setInterval(() => {
         if (isWorking == false) getJob();
-    }, 1000 * 60 * 5);
+    }, 1000 * 60 * 1);
     getJob();
 
     ping();
