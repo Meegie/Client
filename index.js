@@ -189,18 +189,12 @@ async function processJob(job) {
         // Set a timeout to kill the container if it exceeds the time limit
         const containerTimeout = setTimeout(async () => {
             log(` | Time limit of ${timeLimit} seconds reached, stopping container...`);
-            await container.stop();
-            // await fetch(`${process.env.API}/jobs/finish?code=${code}&id=${ID}`, {
-            //     method: 'POST',
-            //     headers: {
-            //         'content-type': 'application/json'
-            //     },
-            //     body: JSON.stringify({
-            //         ok: false,
-            //         exitCode: 1,
-            //         error: `Job exceeded time limit of ${timeLimit} seconds`
-            //     })
-            // });
+            try {
+                await container.stop();
+            } catch (e) {
+                console.log(`> Failed to stop container! ${String(e)}`, e);
+                // process.exit(1);
+            }
             errorJob(ID, `Container exceeded time limit of ${timeLimit} seconds`);
         }, timeLimit * 1000);
 
@@ -232,7 +226,7 @@ async function processJob(job) {
             })
         }).then(r => r.json());
 
-        console.log(` | Job ${job.jobID} finished!`);
+        console.log(` | Job ${job.ID} finished!`);
     } catch (e) {
         errorJob(job.ID, String(e));
     }
