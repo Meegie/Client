@@ -49,6 +49,8 @@ log(`> Connecting to API...`);
 main();
 
 let isWorking = false;
+let cpuAvailable = 0;
+let ramAvailable = 0;
 
 async function main() {
     const ok = await fetch(`${process.env.API}/connect?code=${code}&cpu=${cpu}&cpucount=${clientCPU}&ram=${clientRAM}`);
@@ -57,6 +59,10 @@ async function main() {
         log(` | Failed to connect: ${(await ok.json()).error}`);
         process.exit(1);
     }
+
+    const connectBody = await ok.json();
+    cpuAvailable = connectBody.cpu;
+    ramAvailable = connectBody.ram;
 
     log(` |  Connected!`);
 
@@ -94,57 +100,104 @@ async function getJob() {
     try {
         log(`> Getting job...`);
 
-        var job = await fetch(`${process.env.API}/jobs/get?code=${code}`).then(r => r.json());
+        var jobs = await fetch(`${process.env.API}/jobs/get?code=${code}&cpu=${cpuAvailable}&ram=${ramAvailable}`).then(r => r.json());
 
-        if (job.found == false) {
+        if (jobs.found == false) {
             return log(` | No job found :(`);
         }
 
-        console.log(` | Found job ${job.jobID}`);
+        for (let i = 0; i < jobs.jobs.length; i++) {
+            job = jobs[i];
 
-        const { image, ramRequired, cpuRequired, timeLimit } = job;
 
-        try {
-            await pull(image);
 
-            log(` | Image pulled!`);
+            const { image, ramRequired, cpuRequired, timeLimit, ID } = job;
+            console.log(` | Found job ${ID}`);
 
-            const output = new Stream.Writable({
-                write: async (data) => {
-                    data = String(data);
-                    try {
-                        await fetch(`${process.env.API}/jobs/log?code=${code}`, {
-                            method: 'POST',
-                            headers: {
-                                'content-type': 'application/json'
-                            },
-                            body: JSON.stringify({
-                                message: `[CONTAINER] ${data}`
-                            })
-                        });
-                    } catch (e) {
-                        console.log(`> Failed to send log! ${String(e)}`, e);
-                        process.exit(1);
+            try {
+                await pull(image);
+
+                log(` | Image pulled!`);
+
+                const output = new Stream.Writable({
+                    write: async (data) => {
+                        data = String(data);
+                        try {
+                            await fetch(`${process.env.API}/jobs/log?code=${code}&id=${ID}`, {
+                                method: 'POST',
+                                headers: {
+                                    'content-type': 'application/json'
+                                },
+                                body: JSON.stringify({
+                                    message: `[CONTAINER] ${data}`
+                                })
+                            });
+                        } catch (e) {
+                            console.log(`> Failed to send log! ${String(e)}`, e);
+                            process.exit(1);
+                        }
                     }
-                }
-            });
+                });
 
-            // Start the container
-            var container = await docker.createContainer({
-                Image: image,
-                HostConfig: {
-                    AutoRemove: true,
-                    Memory: ramRequired * 1_048_576,
-                    CpuQuota: cpuRequired * 100_000,
-                    CPUPeriod: 100_000,
-                    CpuShares: 1024
-                }
-            });
+                // Start the container
+                var container = await docker.createContainer({
+                    Image: image,
+                    HostConfig: {
+                        AutoRemove: true,
+                        Memory: ramRequired * 1_048_576,
+                        CpuQuota: cpuRequired * 100_000,
+                        CPUPeriod: 100_000,
+                        CpuShares: 1024
+                    }
+                });
 
-            // Set a timeout to kill the container if it exceeds the time limit
-            const containerTimeout = setTimeout(async () => {
-                log(` | Time limit of ${timeLimit} seconds reached, stopping container...`);
-                await container.stop();
+                // Set a timeout to kill the container if it exceeds the time limit
+                const containerTimeout = setTimeout(async () => {
+                    log(` | Time limit of ${timeLimit} seconds reached, stopping container...`);
+                    await container.stop();
+                    await fetch(`${process.env.API}/jobs/finish?code=${code}&id=${ID}`, {
+                        method: 'POST',
+                        headers: {
+                            'content-type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            ok: false,
+                            exitCode: 1,
+                            error: `Job exceeded time limit of ${timeLimit} seconds`
+                        })
+                    });
+                }, timeLimit * 1000);
+
+                // Start the container and run the job
+                const result = await container.start();
+
+                log(` | Container started!`);
+
+                const containerStream = await container.attach({ stream: true, stdout: true, stderr: true });
+                containerStream.pipe(output);
+
+                // Wait for the container to finish
+                const exitCode = await container.wait();
+
+                clearTimeout(containerTimeout); // Clear the timeout if the container finishes within the time limit
+
+                var isOk = true;
+                if (exitCode.StatusCode != 0) isOk = false;
+
+                await fetch(`${process.env.API}/jobs/finish?code=${code}&id=${ID}`, {
+                    method: 'POST',
+                    headers: {
+                        'content-type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        ok: isOk,
+                        exitCode: exitCode.StatusCode,
+                        error: `Check logs ^`
+                    })
+                }).then(r => r.json());
+
+                console.log(` | Job ${job.jobID} finished!`);
+            } catch (e) {
                 await fetch(`${process.env.API}/jobs/finish?code=${code}`, {
                     method: 'POST',
                     headers: {
@@ -153,54 +206,12 @@ async function getJob() {
                     body: JSON.stringify({
                         ok: false,
                         exitCode: 1,
-                        error: `Job exceeded time limit of ${timeLimit} seconds`
+                        error: String(e)
                     })
-                });
-            }, timeLimit * 1000);
+                }).then(r => r.json());
 
-            // Start the container and run the job
-            const result = await container.start();
-
-            log(` | Container started!`);
-
-            const containerStream = await container.attach({ stream: true, stdout: true, stderr: true });
-            containerStream.pipe(output);
-
-            // Wait for the container to finish
-            const exitCode = await container.wait();
-            
-            clearTimeout(containerTimeout); // Clear the timeout if the container finishes within the time limit
-
-            var isOk = true;
-            if (exitCode.StatusCode != 0) isOk = false;
-
-            await fetch(`${process.env.API}/jobs/finish?code=${code}`, {
-                method: 'POST',
-                headers: {
-                    'content-type': 'application/json'
-                },
-                body: JSON.stringify({
-                    ok: isOk,
-                    exitCode: exitCode.StatusCode,
-                    error: `Check logs ^`
-                })
-            }).then(r => r.json());
-
-            console.log(` | Job ${job.jobID} finished!`);
-        } catch (e) {
-            await fetch(`${process.env.API}/jobs/finish?code=${code}`, {
-                method: 'POST',
-                headers: {
-                    'content-type': 'application/json'
-                },
-                body: JSON.stringify({
-                    ok: false,
-                    exitCode: 1,
-                    error: String(e)
-                })
-            }).then(r => r.json());
-
-            log(` | Job failed: ${String(e)}`);
+                log(` | Job failed: ${String(e)}`);
+            }
         }
     } catch (e) {
         console.log('failed getting job...', e)
