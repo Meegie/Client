@@ -48,7 +48,6 @@ log(` | Created docker client!`);
 log(`> Connecting to API...`);
 main();
 
-let isWorking = false;
 let cpuAvailable = 0;
 let ramAvailable = 0;
 
@@ -67,12 +66,10 @@ async function main() {
     log(` |  Connected!`);
 
     setInterval(() => {
-        if (isWorking == false) {
-            try {
-                getJob();
-            } catch (e) {
-                console.log(`Failed to get job!`, e);
-            }
+        try {
+            getJob();
+        } catch (e) {
+            console.log(`Failed to get job!`, e);
         }
     }, 1000 * 60 * 1);
     try {
@@ -90,11 +87,8 @@ async function ping() {
 }
 
 setInterval(() => {
-    if (isWorking == true) ping();
+    ping();
 }, 1000 * 60 * 1);
-setInterval(() => {
-    if (isWorking == false) ping();
-}, 1000 * 60 * 5);
 
 async function getJob() {
     try {
@@ -112,7 +106,7 @@ async function getJob() {
 
         for (let i = 0; i < jobs.jobs.length; i++) {
             job = jobs.jobs[i];
-            
+
             console.log(` | Found job ${job.ID}`);
 
             processJob(job).then(() => {
@@ -240,7 +234,7 @@ async function processJob(job) {
     } catch (e) {
         errorJob(job.ID, String(e));
     }
-    
+
 }
 
 
