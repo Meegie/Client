@@ -100,6 +100,8 @@ async function getJob() {
     try {
         log(`> Getting job...`);
 
+        console.log(`> available - ${cpuAvailable} vCPU - ${ramAvailable} MB`);
+
         var jobs = await fetch(`${process.env.API}/jobs/get?code=${code}&cpu=${cpuAvailable}&ram=${ramAvailable}`).then(r => r.json());
 
         if (jobs.found == false) {
@@ -149,6 +151,9 @@ async function processJob(job) {
 
     const { image, ramRequired, cpuRequired, timeLimit, ID } = job;
 
+    cpuAvailable = cpuAvailable - cpuRequired;
+    ramAvailable = ramAvailable - ramRequired;
+
     try {
         await pull(image);
 
@@ -169,7 +174,7 @@ async function processJob(job) {
                     });
                 } catch (e) {
                     console.log(`> Failed to send log! ${String(e)}`, e);
-                    process.exit(1);
+                    // process.exit(1);
                 }
             }
         });
@@ -195,6 +200,8 @@ async function processJob(job) {
                 console.log(`> Failed to stop container! ${String(e)}`, e);
                 // process.exit(1);
             }
+            cpuAvailable = cpuAvailable + cpuRequired;
+            ramAvailable = ramAvailable + ramRequired;
             errorJob(ID, `Container exceeded time limit of ${timeLimit} seconds`);
         }, timeLimit * 1000);
 
@@ -225,6 +232,9 @@ async function processJob(job) {
                 error: `Check logs ^`
             })
         }).then(r => r.json());
+
+        cpuAvailable = cpuAvailable + cpuRequired;
+        ramAvailable = ramAvailable + ramRequired;
 
         console.log(` | Job ${job.ID} finished!`);
     } catch (e) {
