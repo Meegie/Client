@@ -175,6 +175,7 @@ async function processJob(job) {
 
         // Start the container
         var container = await docker.createContainer({
+            name: `meegie-${ID}`,
             Image: image,
             HostConfig: {
                 AutoRemove: true,
