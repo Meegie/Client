@@ -106,10 +106,10 @@ async function getJob() {
             return log(` | No job found :(`);
         }
 
+        console.log(jobs);
+
         for (let i = 0; i < jobs.jobs.length; i++) {
-            job = jobs[i];
-
-
+            job = jobs.jobs[i];
 
             const { image, ramRequired, cpuRequired, timeLimit, ID } = job;
             console.log(` | Found job ${ID}`);
