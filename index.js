@@ -153,7 +153,8 @@ async function processJob(job) {
 
         log(` | Image pulled!`);
 
-        let outputLog;
+        var outputLog;
+        outputLog = '';
 
         const output = new Stream.Writable({
             write: (data) => {
@@ -197,6 +198,8 @@ async function processJob(job) {
 
         async function sendLog() {
             if (outputLog.length < 1) return; // No new output, skip sending
+            var copy = outputLog;
+            outputLog = ''; // Clear the log after sending 
             try {
                 var logRes = await fetch(`${process.env.API}/jobs/log?code=${code}&id=${ID}`, {
                     method: 'POST',
@@ -204,7 +207,7 @@ async function processJob(job) {
                         'content-type': 'application/json'
                     },
                     body: JSON.stringify({
-                        message: outputLog
+                        message: copy
                     })
                 }).then(r => r.json());
                 console.log(` | Logged: ${logRes.ID}`);
@@ -212,7 +215,6 @@ async function processJob(job) {
                 console.log(`> Failed to send log! ${String(e)}`, e);
                 // process.exit(1);
             }
-            outputLog = '';
         }
 
         var logInt = setInterval(async () => {
@@ -226,7 +228,6 @@ async function processJob(job) {
         containerStream.on('data', (d) => {
             outputLog += String(d);
         });
-
 
         // Wait for the container to finish
         const exitCode = await container.wait();
