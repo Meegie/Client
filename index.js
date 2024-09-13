@@ -195,25 +195,29 @@ async function processJob(job) {
 
         log(` | Container started!`);
 
+        async function sendLog() {
+            if (outputLog.length < 1) return; // No new output, skip sending
+            try {
+                var logRes = await fetch(`${process.env.API}/jobs/log?code=${code}&id=${ID}`, {
+                    method: 'POST',
+                    headers: {
+                        'content-type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message: outputLog
+                    })
+                }).then(r => r.json());
+                console.log(` | Logged: ${logRes.ID}`);
+            } catch (e) {
+                console.log(`> Failed to send log! ${String(e)}`, e);
+                // process.exit(1);
+            }
+            outputLog = '';
+        }
+
         var logInt = setInterval(async () => {
             // console.log(outputLog);
-            if (outputLog.length < 1) return; // No new output, skip sending
-                try {
-                    var logRes = await fetch(`${process.env.API}/jobs/log?code=${code}&id=${ID}`, {
-                        method: 'POST',
-                        headers: {
-                            'content-type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            message: outputLog
-                        })
-                    }).then(r => r.json());
-                    console.log(` | Logged: ${logRes.ID}`);
-                } catch (e) {
-                    console.log(`> Failed to send log! ${String(e)}`, e);
-                    // process.exit(1);
-                }
-                outputLog = '';
+            sendLog();
         }, 3000);
 
         const containerStream = await container.attach({ stream: true, stdout: true, stderr: true });
@@ -229,6 +233,8 @@ async function processJob(job) {
 
         clearTimeout(containerTimeout); // Clear the timeout if the container finishes within the time limit
         clearInterval(logInt); // Clear the timeout if the container finishes
+
+        await sendLog();
 
         var isOk = true;
         if (exitCode.StatusCode != 0) isOk = false;
