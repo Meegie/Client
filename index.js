@@ -153,7 +153,7 @@ async function processJob(job) {
 
         log(` | Image pulled!`);
 
-        var outputLog;
+        let outputLog;
         outputLog = '';
 
         const output = new Stream.Writable({
@@ -196,10 +196,8 @@ async function processJob(job) {
 
         log(` | Container started!`);
 
-        async function sendLog() {
+        async function sendLog(outputLog) {
             if (outputLog.length < 1) return; // No new output, skip sending
-            var copy = outputLog;
-            outputLog = ''; // Clear the log after sending 
             try {
                 var logRes = await fetch(`${process.env.API}/jobs/log?code=${code}&id=${ID}`, {
                     method: 'POST',
@@ -207,7 +205,7 @@ async function processJob(job) {
                         'content-type': 'application/json'
                     },
                     body: JSON.stringify({
-                        message: copy
+                        message: outputLog
                     })
                 }).then(r => r.json());
                 console.log(` | Logged: ${logRes.ID}`);
@@ -219,7 +217,8 @@ async function processJob(job) {
 
         var logInt = setInterval(async () => {
             // console.log(outputLog);
-            sendLog();
+            await sendLog(outputLog);
+            outputLog = '';
         }, 3000);
 
         const containerStream = await container.attach({ stream: true, stdout: true, stderr: true });
@@ -235,7 +234,7 @@ async function processJob(job) {
         clearTimeout(containerTimeout); // Clear the timeout if the container finishes within the time limit
         clearInterval(logInt); // Clear the timeout if the container finishes
 
-        await sendLog();
+        await sendLog(outputLog);
 
         var isOk = true;
         if (exitCode.StatusCode != 0) isOk = false;
