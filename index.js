@@ -153,23 +153,13 @@ async function processJob(job) {
 
         log(` | Image pulled!`);
 
+        let outputLog;
+
         const output = new Stream.Writable({
-            write: async (data) => {
+            write: (data) => {
                 data = String(data);
-                try {
-                    await fetch(`${process.env.API}/jobs/log?code=${code}&id=${ID}`, {
-                        method: 'POST',
-                        headers: {
-                            'content-type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            message: `[CONTAINER] ${data}`
-                        })
-                    });
-                } catch (e) {
-                    console.log(`> Failed to send log! ${String(e)}`, e);
-                    // process.exit(1);
-                }
+                outputLog += data;
+                return data;
             }
         });
 
@@ -201,17 +191,44 @@ async function processJob(job) {
         }, timeLimit * 1000);
 
         // Start the container and run the job
-        const result = await container.start();
+        await container.start();
 
         log(` | Container started!`);
 
+        var logInt = setInterval(async () => {
+            // console.log(outputLog);
+            if (outputLog.length < 1) return; // No new output, skip sending
+                try {
+                    var logRes = await fetch(`${process.env.API}/jobs/log?code=${code}&id=${ID}`, {
+                        method: 'POST',
+                        headers: {
+                            'content-type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            message: outputLog
+                        })
+                    }).then(r => r.json());
+                    console.log(` | Logged: ${logRes.ID}`);
+                } catch (e) {
+                    console.log(`> Failed to send log! ${String(e)}`, e);
+                    // process.exit(1);
+                }
+                outputLog = '';
+        }, 1000);
+
         const containerStream = await container.attach({ stream: true, stdout: true, stderr: true });
         containerStream.pipe(output);
+
+        containerStream.on('data', (d) => {
+            outputLog += String(d);
+        });
+
 
         // Wait for the container to finish
         const exitCode = await container.wait();
 
         clearTimeout(containerTimeout); // Clear the timeout if the container finishes within the time limit
+        clearInterval(logInt); // Clear the timeout if the container finishes
 
         var isOk = true;
         if (exitCode.StatusCode != 0) isOk = false;
