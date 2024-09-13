@@ -214,7 +214,7 @@ async function processJob(job) {
                     // process.exit(1);
                 }
                 outputLog = '';
-        }, 1000);
+        }, 3000);
 
         const containerStream = await container.attach({ stream: true, stdout: true, stderr: true });
         containerStream.pipe(output);
