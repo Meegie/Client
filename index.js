@@ -149,12 +149,15 @@ async function processJob(job) {
     ramAvailable = ramAvailable - ramRequired;
 
     try {
+        let outputLog;
+        outputLog = '[System] Pulling image...\n';
+
+        var startPull = Date.now()/1000;
         await pull(image);
+        var endPull = Date.now()/1000;
+        outputLog += `> Image pulled in ${Math.ceil(endPull - startPull)} seconds\n\nOUTPUT:\n`;
 
         log(` | Image pulled!`);
-
-        let outputLog;
-        outputLog = '';
 
         const output = new Stream.Writable({
             write: (data) => {
@@ -221,7 +224,7 @@ async function processJob(job) {
             outputLog = '';
         }, 3000);
 
-        const containerStream = await container.attach({ stream: true, stdout: true, stderr: true });
+        const containerStream = await container.attach({ stream: true, stdout: true, stderr: true, logs: true });
         containerStream.pipe(output);
 
         containerStream.on('data', (d) => {
