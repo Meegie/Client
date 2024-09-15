@@ -112,7 +112,7 @@ async function getJob() {
                             await ct.kill();
                         }
 
-                        var logRes = await fetch(`${process.env.API}/jobs/log?code=${code}&id=${ID}`, {
+                        var logRes = await fetch(`${process.env.API}/jobs/log?code=${code}&id=${action.jobID}`, {
                             method: 'POST',
                             headers: {
                                 'content-type': 'application/json'
