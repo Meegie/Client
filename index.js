@@ -98,11 +98,41 @@ async function getJob() {
 
         var jobs = await fetch(`${process.env.API}/jobs/get?code=${code}&cpu=${cpuAvailable}&ram=${ramAvailable}`).then(r => r.json());
 
+        console.log(jobs);
+        if (jobs.actions.length > 0) {
+            for (let i = 0; i < jobs.actions.length; i++) {
+                const action = jobs.actions[i];
+                log(`> Processing action ${action.jobID} -> ${action.action}...`);
+
+                if (action.action == 'kill') {
+                    try {
+                        var ctList = await docker.listContainers({ name: `meegie-${action.jobID}` });
+                        if (ctList.length > 0) {
+                            var ct = docker.getContainer(ctList[0].Id);
+                            await ct.kill();
+                        }
+
+                        var logRes = await fetch(`${process.env.API}/jobs/log?code=${code}&id=${ID}`, {
+                            method: 'POST',
+                            headers: {
+                                'content-type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                message: `> Job killed!`
+                            })
+                        }).then(r => r.json());
+                        
+                        log(`| Killed job ${action.jobID}`);
+                    } catch (e) {
+                        log(`| Failed to kill job ${action.jobID}: ${e}`, e);
+                    }
+                }
+            }
+        }
+
         if (jobs.found == false) {
             return log(` | No job found :(`);
         }
-
-        console.log(jobs);
 
         for (let i = 0; i < jobs.jobs.length; i++) {
             job = jobs.jobs[i];
