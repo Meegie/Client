@@ -179,18 +179,28 @@ async function processJob(job) {
             }
         });
 
+        let runPath = `${__dirname}/cache/${job.ID}.sh`;
+        let dataPath = `${__dirname}/cache/${job.ID}.txt`;
+
         try {
-            let runPath = `${__dirname}/cache/${job.ID}.sh`;
             fs.writeFileSync(runPath, job.command);
             fs.chmodSync(runPath, 777);
+
+            fs.writeFileSync(dataPath, job.data);
+            fs.chmodSync(dataPath, 777);
+
+            console.log(`> Wrote container files!`);
         } catch (error) {
             cpuAvailable = cpuAvailable + cpuRequired;
             ramAvailable = ramAvailable + ramRequired;
 
-            errorJob(job.ID, 'Failed writing command', job.command);
+            console.log(error);
+
+            return errorJob(job.ID, 'Failed writing command');
         }
 
-        let bind = `${__dirname}/cache/${job.ID}.sh:/run.sh`;
+        let CommandBind = `${__dirname}/cache/${job.ID}.sh:/run.sh`;
+        let DataBind = `${__dirname}/cache/${job.ID}.txt:/request.txt`;
 
         let container;
         // Start the container
@@ -205,7 +215,7 @@ async function processJob(job) {
                 CPUPeriod: 100_000,
                 CpuShares: 1024,
 
-                Binds: [bind]
+                Binds: [CommandBind, DataBind]
             }
         });
 
@@ -310,7 +320,8 @@ async function processJob(job) {
         cpuAvailable = cpuAvailable + cpuRequired;
         ramAvailable = ramAvailable + ramRequired;
 
-        fs.rmSync(bind);
+        fs.rmSync(runPath);
+        fs.rmSync(dataPath);
 
         console.log(` | Job ${job.ID} finished! ${exitCode}`);
     } catch (e) {
