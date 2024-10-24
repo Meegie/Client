@@ -395,7 +395,7 @@ async function buildImage(job) {
                 // console.log(` | ${res.stream}`);
             }
             if (res.status && res.progress) {
-                // console.log(` | ${res.status} ${res.progress}`);
+                console.log(` | ${res.status} ${res.progress}`);
             } else if (res.status) {
                 console.log(` | ${res.status}`);
             }
