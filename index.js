@@ -392,7 +392,10 @@ async function buildImage(job) {
             resolve(res);
         }, (res) => {
 
-            if (res.error) return reject(res.error);
+            if (res.error) {
+                errorJob(job.ID, res.error);
+                return reject(res.error);
+            }
 
             if (res.stream) {
                 console.log(` | Str: ${res.stream}`);
