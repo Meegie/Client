@@ -388,6 +388,7 @@ async function buildImage(job) {
                 errorJob(job.ID, err);
                 return reject(err);
             }
+            console.log(res);
             resolve(res);
         }, (res) => {
 
