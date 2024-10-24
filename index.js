@@ -112,7 +112,8 @@ async function getJob() {
             processJob(job).then(() => {
                 log(`> Job finished: ${job.ID}`);
             }).catch(e => {
-                errorJob(job.ID, e);
+                console.log('ProcessJob.func failed', e)
+                errorJob(job.ID, String(e));
             });
 
         }
@@ -122,6 +123,7 @@ async function getJob() {
 }
 
 async function errorJob(id, error) {
+    if (!error || error == 'null') console.warn(`No error message! ${id}`);
     try {
         await fetch(`${process.env.API}/jobs/finish?code=${code}&id=${id}`, {
             method: 'POST',
@@ -130,7 +132,7 @@ async function errorJob(id, error) {
             },
             body: JSON.stringify({
                 ok: false,
-                exitCode: 1,
+                exitCode: -500,
                 error: String(error)
             })
         }).then(r => r.json());
@@ -143,21 +145,26 @@ async function errorJob(id, error) {
 
 async function processJob(job) {
 
-    const { image, ramRequired, cpuRequired, timeLimit, ID } = job;
+    const { ramRequired, cpuRequired, timeLimit, ID } = job;
 
     cpuAvailable = cpuAvailable - cpuRequired;
     ramAvailable = ramAvailable - ramRequired;
 
     try {
         let outputLog;
-        outputLog = '[System] Pulling image...\n';
+        outputLog = '[System] Building image...\n';
 
-        var startPull = Date.now()/1000;
-        await pull(image);
-        var endPull = Date.now()/1000;
-        outputLog += `> Image pulled in ${Math.ceil(endPull - startPull)} seconds\n\nOUTPUT:\n`;
+        var startPull = Date.now() / 1000;
+        let image;
+        try {
+            image = await buildImage(job);
+        } catch (error) {
+            console.log('Failed to build image', error);
+        }
+        var endPull = Date.now() / 1000;
+        outputLog += `> Built in ${Math.ceil(endPull - startPull)} seconds\n\nOUTPUT:\n`;
 
-        log(` | Image pulled!`);
+        log(` | Image built!`);
 
         const output = new Stream.Writable({
             write: (data) => {
@@ -167,18 +174,35 @@ async function processJob(job) {
             }
         });
 
-        // Start the container
-        var container = await docker.createContainer({
-            name: `meegie-${ID}`,
-            Image: image,
-            HostConfig: {
-                AutoRemove: true,
-                Memory: ramRequired * 1_048_576,
-                CpuQuota: cpuRequired * 100_000,
-                CPUPeriod: 100_000,
-                CpuShares: 1024
-            }
-        });
+        try {
+            fs.writeFileSync(`${__dirname}/cache/${job.ID}.sh`, job.command);
+        } catch (error) {
+            console.log('Failed writing command', job.command);
+        }
+
+        let container;
+        try {
+            // Start the container
+            container = await docker.createContainer({
+                name: `meegie-${ID}`,
+                Image: image,
+                HostConfig: {
+                    AutoRemove: true,
+
+                    Memory: ramRequired * 1_048_576,
+                    CpuQuota: cpuRequired * 100_000,
+                    CPUPeriod: 100_000,
+                    CpuShares: 1024,
+
+                    Binds: [`${__dirname}/cache/${job.ID}.sh:/run.sh`]
+                }
+            });
+        } catch (error) {
+            console.log('Failed to create container', error);
+        }
+
+
+        if (!container) return errorJob(ID, 'Failed to create container');
 
         // Set a timeout to kill the container if it exceeds the time limit
         const containerTimeout = setTimeout(async () => {
@@ -194,8 +218,12 @@ async function processJob(job) {
             errorJob(ID, `Container exceeded time limit of ${timeLimit} seconds`);
         }, timeLimit * 1000);
 
-        // Start the container and run the job
-        await container.start();
+        try {
+            // Start the container and run the job
+            await container.start();
+        } catch (error) {
+            console.log('Failed to start container');
+        }
 
         log(` | Container started!`);
 
@@ -224,20 +252,32 @@ async function processJob(job) {
             outputLog = '';
         }, 3000);
 
-        const containerStream = await container.attach({ stream: true, stdout: true, stderr: true, logs: true });
-        containerStream.pipe(output);
+        try {
+            const containerStream = await container.attach({ stream: true, stdout: true, stderr: true, logs: true });
+            containerStream.pipe(output);
 
-        containerStream.on('data', (d) => {
-            outputLog += String(d);
-        });
+            containerStream.on('data', (d) => {
+                outputLog += String(d);
+            });
+        } catch (err) {
+            console.log('Failed to attach to container', err);
+            // process.exit(1);
+        }
 
         // Wait for the container to finish
-        const exitCode = await container.wait();
+        let exitCode = await container.wait();
+
 
         clearTimeout(containerTimeout); // Clear the timeout if the container finishes within the time limit
         clearInterval(logInt); // Clear the timeout if the container finishes
 
-        await sendLog(outputLog);
+        try {
+            await sendLog(outputLog);
+
+        } catch (error) {
+            console.log(`> Failed to send container log at finish! ${String(error)}`, error);
+            // process.exit(1);
+        }
 
         var isOk = true;
         if (exitCode.StatusCode != 0) isOk = false;
@@ -252,47 +292,91 @@ async function processJob(job) {
                 exitCode: exitCode.StatusCode,
                 error: `Check logs ^`
             })
-        }).then(r => r.json());
+        }).then(r => r.json()).catch((e) => {
+            console.log(`> Failed to send container finish! ${String(e)}`, e);
+            // process.exit(1);
+        });
 
         cpuAvailable = cpuAvailable + cpuRequired;
         ramAvailable = ramAvailable + ramRequired;
 
-        console.log(` | Job ${job.ID} finished!`);
+        console.log(` | Job ${job.ID} finished! ${exitCode}`);
     } catch (e) {
+        console.log(`> Failed to process job! ${String(e)}`, e);
         errorJob(job.ID, String(e));
     }
 
 }
 
 
-async function pull(img) {
-    //followProgress(stream, onFinished, [onProgress])
+async function buildImage(job) {
 
-    log(`> Pulling ${img}`);
+    var path = `./cache/build/${job.ID}`;
+    fs.mkdirSync(path, { recursive: true });
 
-    return new Promise((resolve, reject) => {
+    var template = fs.readFileSync(`./DockerTemplate.txt`, 'utf-8');
 
-        docker.pull(img, function (err, stream) {
-            if (err) return reject(err);
-            //...
-            try {
-                docker.modem.followProgress(stream, onFinished, onProgress);
+    let BaseImage;
 
-                function onFinished(err, output) {
-                    //output is an array with output json parsed objects
-                    log(` | Pull ${img} finished!`, err);
-                    if (err) return reject(err);
+    switch (job.baseImage) {
+        case 'debian-12':
+            BaseImage = 'debian:12';
+            break;
+        case 'ubuntu-24':
+            BaseImage = 'ubuntu:24.04';
+            break;
+        case 'alpine-3.20':
+            BaseImage = 'alpine:3.20';
+            break;
+        default:
+            BaseImage = 'debian:12';
+            break;
+    }
 
-                    resolve();
-                    //...
-                }
-                function onProgress(event) {
-                    //...
-                    log(` | Pull progress: ${event.status}`)
-                }
-            } catch (e) {
-                reject(e);
+    template = template.replace('{{ IMG }}', BaseImage);
+
+    fs.writeFileSync(`${path}/Dockerfile`, template);
+    fs.writeFileSync(`${path}/install.sh`, job.baseCommand);
+
+    let buildStream = await docker.buildImage({
+        context: path,
+        src: [`Dockerfile`, `install.sh`]
+    }, {
+        pull: true,
+
+        memory: job.ramRequired * 1_048_576,
+        CpuQuota: job.cpuRequired * 100_000,
+        CPUPeriod: 100_000,
+        CpuShares: 1024,
+
+        t: `meegie-${job.functionID}:latest`
+    });
+
+    await new Promise((resolve, reject) => {
+        docker.modem.followProgress(buildStream, (err, res) => {
+            if (res) return reject(err);
+            resolve(res);
+        }, (res) => {
+
+            if (res.stream) {
+                // console.log(` | ${res.stream}`);
             }
+            if (res.status && res.progress) {
+                // console.log(` | ${res.status} ${res.progress}`);
+            } else if (res.status) {
+                console.log(` | ${res.status}`);
+            }
+
+            // console.log(res);
+
         });
     });
+
+    log(` | Image built: meegie-${job.functionID}:latest`);
+
+    fs.rmSync(`${path}/Dockerfile`);
+    fs.rmSync(`${path}/install.sh`);
+    fs.rmdirSync(path);
+
+    return `meegie-${job.functionID}:latest`;
 }
