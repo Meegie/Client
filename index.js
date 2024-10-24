@@ -159,6 +159,11 @@ async function processJob(job) {
         try {
             image = await buildImage(job);
         } catch (error) {
+
+            cpuAvailable = cpuAvailable + cpuRequired;
+            ramAvailable = ramAvailable + ramRequired;
+
+            errorJob(job.ID, 'Failed to build image');
             console.log('Failed to build image', error);
         }
         var endPull = Date.now() / 1000;
@@ -175,34 +180,41 @@ async function processJob(job) {
         });
 
         try {
-            fs.writeFileSync(`${__dirname}/cache/${job.ID}.sh`, job.command);
+            let runPath = `${__dirname}/cache/${job.ID}.sh`;
+            fs.writeFileSync(runPath, job.command);
+            fs.chmodSync(runPath, 777);
         } catch (error) {
-            console.log('Failed writing command', job.command);
+            cpuAvailable = cpuAvailable + cpuRequired;
+            ramAvailable = ramAvailable + ramRequired;
+
+            errorJob(job.ID, 'Failed writing command', job.command);
         }
+
+        let bind = `${__dirname}/cache/${job.ID}.sh:/run.sh`;
 
         let container;
-        try {
-            // Start the container
-            container = await docker.createContainer({
-                name: `meegie-${ID}`,
-                Image: image,
-                HostConfig: {
-                    AutoRemove: true,
+        // Start the container
+        container = await docker.createContainer({
+            name: `meegie-${ID}`,
+            Image: image,
+            HostConfig: {
+                AutoRemove: true,
 
-                    Memory: ramRequired * 1_048_576,
-                    CpuQuota: cpuRequired * 100_000,
-                    CPUPeriod: 100_000,
-                    CpuShares: 1024,
+                Memory: ramRequired * 1_048_576,
+                CpuQuota: cpuRequired * 100_000,
+                CPUPeriod: 100_000,
+                CpuShares: 1024,
 
-                    Binds: [`${__dirname}/cache/${job.ID}.sh:/run.sh`]
-                }
-            });
-        } catch (error) {
-            console.log('Failed to create container', error);
+                Binds: [bind]
+            }
+        });
+
+
+        if (!container) {
+            cpuAvailable = cpuAvailable + cpuRequired;
+            ramAvailable = ramAvailable + ramRequired;
+            return errorJob(ID, 'Failed to create container');
         }
-
-
-        if (!container) return errorJob(ID, 'Failed to create container');
 
         // Set a timeout to kill the container if it exceeds the time limit
         const containerTimeout = setTimeout(async () => {
@@ -218,13 +230,7 @@ async function processJob(job) {
             errorJob(ID, `Container exceeded time limit of ${timeLimit} seconds`);
         }, timeLimit * 1000);
 
-        try {
-            // Start the container and run the job
-            await container.start();
-        } catch (error) {
-            console.log('Failed to start container');
-        }
-
+        await container.start();
         log(` | Container started!`);
 
         async function sendLog(outputLog) {
@@ -260,6 +266,9 @@ async function processJob(job) {
                 outputLog += String(d);
             });
         } catch (err) {
+            cpuAvailable = cpuAvailable + cpuRequired;
+            ramAvailable = ramAvailable + ramRequired;
+
             console.log('Failed to attach to container', err);
             // process.exit(1);
         }
@@ -272,6 +281,7 @@ async function processJob(job) {
         clearInterval(logInt); // Clear the timeout if the container finishes
 
         try {
+
             await sendLog(outputLog);
 
         } catch (error) {
@@ -300,9 +310,11 @@ async function processJob(job) {
         cpuAvailable = cpuAvailable + cpuRequired;
         ramAvailable = ramAvailable + ramRequired;
 
+        fs.rmSync(bind);
+
         console.log(` | Job ${job.ID} finished! ${exitCode}`);
     } catch (e) {
-        console.log(`> Failed to process job! ${String(e)}`, e);
+        console.log(`> Failed to process job! ${String(e)}`);
         errorJob(job.ID, String(e));
     }
 
@@ -317,23 +329,29 @@ async function buildImage(job) {
     var template = fs.readFileSync(`./DockerTemplate.txt`, 'utf-8');
 
     let BaseImage;
+    let entrypoint;
 
     switch (job.baseImage) {
         case 'debian-12':
             BaseImage = 'debian:12';
+            entrypoint = 'bash';
             break;
         case 'ubuntu-24':
             BaseImage = 'ubuntu:24.04';
+            entrypoint = 'bash';
             break;
         case 'alpine-3.20':
             BaseImage = 'alpine:3.20';
+            entrypoint = 'ash';
             break;
         default:
             BaseImage = 'debian:12';
+            entrypoint = 'bash';
             break;
     }
 
     template = template.replace('{{ IMG }}', BaseImage);
+    template = template.replace('{{ ENTRY }}', entrypoint);
 
     fs.writeFileSync(`${path}/Dockerfile`, template);
     fs.writeFileSync(`${path}/install.sh`, job.baseCommand);
@@ -354,7 +372,11 @@ async function buildImage(job) {
 
     await new Promise((resolve, reject) => {
         docker.modem.followProgress(buildStream, (err, res) => {
-            if (res) return reject(err);
+            if (err) {
+                console.log(`> Failed to build image! ${String(err)}`, err);
+                errorJob(job.ID, err);
+                return reject(err);
+            }
             resolve(res);
         }, (res) => {
 
