@@ -392,12 +392,12 @@ async function buildImage(job) {
         }, (res) => {
 
             if (res.stream) {
-                console.log(` | ${res.stream}`);
+                console.log(` | Str: ${res.stream}`);
             }
             if (res.status && res.progress) {
-                console.log(` | ${res.status} ${res.progress}`);
+                console.log(` | Prog: ${res.status} ${res.progress}`);
             } else if (res.status) {
-                console.log(` | ${res.status}`);
+                console.log(` | Stat: ${res.status}`);
             }
 
             // console.log(res);
