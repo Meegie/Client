@@ -82,7 +82,7 @@ async function main() {
 }
 
 async function ping() {
-    console.log(`> Sending heartbeat...`);
+    // console.log(`> Sending heartbeat...`);
     await fetch(`${process.env.API}/ping?code=${code}`);
 }
 
